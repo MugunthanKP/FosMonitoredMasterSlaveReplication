@@ -1,0 +1,7 @@
+master
+oldfiles
+slave
+master_log_01
+newSecondary.txt
+slave_log_01
+Test.sh
