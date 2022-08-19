@@ -1,121 +1,166 @@
 #!/bin/bash
 
-. ./fos.conf
+. $2
 
 designation=$1
 
 function promoteSlave(){
 
-    pg_ctl -D $this_pg_path promote
+    $this_pg_path/pg_ctl -D $this_data_path promote
 
-    psql postgres -c "CHECKPOINT" -p $this_port
+    $this_pg_path/psql postgres -c "CHECKPOINT" -p $this_port
+
+}
+
+function changeConfigurationsFor(){
+
+echo "PRIMARY_HOST=$SECONDARY_HOST
+PRIMARY_PORT=$SECONDARY_PORT
+PRIMARY_PG_PATH=$SECONDARY_PG_PATH
+PRIMARY_DATA_PATH=$SECONDARY_DATA_PATH
+PRIMARY_RECOVERY_FILE=$SECONDARY_RECOVERY_FILE
+PRIMARY_CONF_FILE=$SECONDARY_CONF_FILE
+PRIMARY_LOG_FILE=$SECONDARY_LOG_FILE
+PRIMARY_FOS_FILE=$SECONDARY_FOS_FILE
+PRIMARY_FOS_PID_FILE=$SECONDARY_FOS_PID_FILE
+PRIMARY_FOS_CONF_FILE=$SECONDARY_FOS_CONF_FILE
+PRIMARY_FOS_LOG_FILE=$SECONDARY_FOS_LOG_FILE
+SECONDARY_HOST=$PRIMARY_HOST
+SECONDARY_PORT=$PRIMARY_PORT
+SECONDARY_PG_PATH=$PRIMARY_PG_PATH
+SECONDARY_RECOVERY_FILE=$PRIMARY_RECOVERY_FILE
+SECONDARY_LOG_FILE=$PRIMARY_LOG_FILE
+SECONDARY_CONF_FILE=$PRIMARY_CONF_FILE
+SECONDARY_DATA_PATH=$PRIMARY_DATA_PATH
+SECONDARY_FOS_FILE=$PRIMARY_FOS_FILE
+SECONDARY_FOS_PID_FILE=$PRIMARY_FOS_PID_FILE
+SECONDARY_FOS_CONF_FILE=$PRIMARY_FOS_CONF_FILE
+SECONDARY_FOS_LOG_FILE=$PRIMARY_FOS_LOG_FILE" | ssh $1 "cat > $2"
+
+echo "---------------------------------->  changed configurations in the folder @$1 $2"
 
 }
 
 function changeConfigurations(){
 
-designation=Primary
+designation=Primary  
+echo "---------------------------------->  changed Designation to Primary"
 
-echo "primary_port=$secondary_port
-primary_pg_path=$secondary_pg_path
-primary_recovery_file=$secondary_recovery_file
-primary_conf_file=$secondary_conf_file
-primary_log_file=$secondary_log_file
-primary_fosPid_file=$secondary_fosPid_file
-secondary_port=$primary_port
-secondary_recovery_file=$primary_recovery_file
-secondary_log_file=$primary_log_file
-secondary_conf_file=$primary_conf_file
-secondary_pg_path=$primary_pg_path
-secondary_fosPid_file=$primary_fosPid_file" > fos.conf
+changeConfigurationsFor $this_host $this_fos_conf_file
+changeConfigurationsFor $another_host $another_fos_conf_file
 
+echo "---------------------------------->  Configuartion Changes Completed"
 
 }
 
 function pg_rewind_func(){
 
-    pg_ctl -D $another_pg_path -l $another_log_file start
+    ssh $another_host "
 
-    pg_ctl -D $another_pg_path -l $another_log_file stop
+    $another_pg_path/pg_ctl -D $another_data_path -l $another_log_file start
 
-    pg_rewind --target-pgdata=$another_pg_path --source-server="port=$this_port user=$USER dbname=postgres" --progress
-    touch $another_pg_path/recovery.conf
+    $another_pg_path/pg_ctl -D $another_data_path -l $another_log_file stop
+
+    $another_pg_path/pg_rewind --target-pgdata=$another_data_path --source-server=\"port=$this_port host=$this_host user=$USER dbname=postgres\" --progress
     
-    while IFS='=' read key value;do
-        sed -i /"$key = "/d  $another_pg_path/recovery.conf
-        echo "$key = $value" >> $another_pg_path/recovery.conf
-    done < $another_recovery_file
+    touch $another_data_path/recovery.conf
 
-    sed -i /"port = "/d  $another_pg_path/postgresql.conf 
-    echo "port = $another_port" >> $another_pg_path/postgresql.conf
+    cat $another_recovery_file > $another_data_path/recovery.conf
 
-    pg_ctl -D $another_pg_path -l $another_log_file start
+    sed -i /\"port = \"/d  $another_data_path/postgresql.conf 
+    echo \"port = $another_port\" >> $another_data_path/postgresql.conf
 
-    setsid -f ./autoPgRewindFos.sh Secondary 1>newSecondary.txt
-    
+    $another_pg_path/pg_ctl -D $another_data_path -l $another_log_file start"
+
+    setsid -f ssh $another_host "$another_fos_file Secondary $another_fos_conf_file 1>$another_fos_log_file" ####################################
+
+
 }
 
 function get_fos_pid(){
 
-    local value=$(grep fosPid $another_fosPid_file|cut -d'=' -f2) 
-    local another_fos_pid=$(ps aux|grep $value| grep -v grep| cut -d' ' -f2)
+    value=$(ssh $another_host "grep fosPid $another_fosPid_file|cut -d'=' -f2") 
 
-    echo $another_fos_pid
-
+    another_fos_pid=$(ssh localhost "ps aux | grep $value|grep -v grep| awk '{print $2}'" |awk '{print $2}')
     
 }
 
 function get_postgres_pid(){
     
-    local postgres_pid=$(lsof -t -i:$1 | grep "" -m 1)
-    # Check whether it is postgres
+    postgres_pid=$(lsof -i:$1 | grep postgres -m 1|awk '{print $2}')
 
-    echo $postgres_pid
 }
 
 if [ $designation = Secondary ];then
-    this_port=$secondary_port
-    this_pg_path=$secondary_pg_path
-    this_conf_file=$secondary_conf_file
-    this_recovery_file=$secondary_recovery_file
-    this_log_file=$secondary_log_file
-    this_fosPid_file=$secondary_fosPid_file
-    another_port=$primary_port
-    another_pg_path=$primary_pg_path
-    another_conf_file=$primary_conf_file
-    another_recovery_file=$primary_recovery_file
-    another_log_file=$primary_log_file
-    another_fosPid_file=$primary_fosPid_file
+    this_host=$SECONDARY_HOST
+    this_port=$SECONDARY_PORT
+    this_pg_path=$SECONDARY_PG_PATH
+    this_data_path=$SECONDARY_DATA_PATH
+    this_conf_file=$SECONDARY_CONF_FILE
+    this_recovery_file=$SECONDARY_RECOVERY_FILE
+    this_log_file=$SECONDARY_LOG_FILE
+    this_fos_file=$SECONDARY_FOS_FILE
+    this_fosPid_file=$SECONDARY_FOS_PID_FILE
+    this_fos_conf_file=$SECONDARY_FOS_CONF_FILE
+    this_fos_log_file=$SECONDARY_FOS_LOG_FILE
+    another_host=$PRIMARY_HOST
+    another_port=$PRIMARY_PORT
+    another_pg_path=$PRIMARY_PG_PATH
+    another_data_path=$PRIMARY_DATA_PATH
+    another_conf_file=$PRIMARY_CONF_FILE
+    another_recovery_file=$PRIMARY_RECOVERY_FILE
+    another_log_file=$PRIMARY_LOG_FILE
+    another_fos_file=$PRIMARY_FOS_FILE
+    another_fosPid_file=$PRIMARY_FOS_PID_FILE
+    another_fos_conf_file=$PRIMARY_FOS_CONF_FILE
+    another_fos_log_file=$PRIMARY_FOS_LOG_FILE
+elif [ $designation = Primary ];then
+    this_host=$PRIMARY_HOST
+    this_port=$PRIMARY_PORT
+    this_pg_path=$PRIMARY_PG_PATH
+    this_data_path=$PRIMARY_DATA_PATH
+    this_conf_file=$PRIMARY_CONF_FILE
+    this_recovery_file=$PRIMARY_RECOVERY_FILE
+    this_log_file=$PRIMARY_LOG_FILE
+    this_fos_file=$PRIMARY_FOS_FILE
+    this_fosPid_file=$PRIMARY_FOS_PID_FILE
+    this_fos_conf_file=$PRIMARY_FOS_CONF_FILE
+    this_fos_log_file=$PRIMARY_FOS_LOG_FILE
+    another_host=$SECONDARY_HOST
+    another_port=$SECONDARY_PORT
+    another_pg_path=$SECONDARY_PG_PATH
+    another_data_path=$SECONDARY_DATA_PATH
+    another_conf_file=$SECONDARY_CONF_FILE
+    another_recovery_file=$SECONDARY_RECOVERY_FILE
+    another_log_file=$SECONDARY_LOG_FILE
+    another_fos_file=$SECONDARY_FOS_FILE
+    another_fosPid_file=$SECONDARY_FOS_PID_FILE
+    another_fos_conf_file=$SECONDARY_FOS_CONF_FILE
+    another_fos_log_file=$SECONDARY_FOS_LOG_FILE
 else
-    this_port=$primary_port
-    this_pg_path=$primary_pg_path
-    this_conf_file=$primary_conf_file
-    this_recovery_file=$primary_recovery_file
-    this_log_file=$primary_log_file
-    this_fosPid_file=$primary_fosPid_file
-    another_por1814641t=$secondary_port
-    another_pg_path=$secondary_pg_path
-    another_conf_file=$secondary_conf_file
-    another_recovery_file=$secondary_recovery_file
-    another_log_file=$secondary_log_file
-    another_fosPid_file=$secondary_fosPid_file
+    echo "Please start by Primary or Secondary"
+    exit 0
 fi
 
-echo "fosPid=$BASHPID" > $this_pg_path/fosPid.txt
+echo "fosPid=$BASHPID" > $this_fosPid_file
 
 while [ true ];do
+    
+    get_postgres_pid $this_port
 
-    pid=$(get_postgres_pid $this_port)
+    pid=$postgres_pid
 
     declare -i count
 
     count=3
 
     while [[ -z $pid && count -lt 3 ]];do
+        get_postgres_pid $this_port
 
-        pid=$(get_postgres_pid $this_port)
+        pid=$postgres_pid
 
-        echo "starting postgres"
+        echo "----------------------------------> Trying to start postgres :Count:$count"
+
         pg_ctl -D $this_pg_path -l $this_log_file start
 
         count=count+1
@@ -126,29 +171,26 @@ while [ true ];do
 
         if [ $designation = Secondary ];then
 
-            another_fos_pid=$(get_fos_pid)
+            get_fos_pid
 
             if [ -z $another_fos_pid ];then
 
-                echo "promoting slave"
                 promoteSlave
-                echo "changing configurations secondary to primary"
                 changeConfigurations
-                echo "rewinding old primary"
                 pg_rewind_func
-                echo "rewinding finished"
 
             fi 
         fi
 
     else
-        break
+        echo "---------------------------------->  Failed To start the Server At Port $this_port: Aborting FOS" 
+        exit 0
     fi
     
     if [ $designation = Secondary ];then
-        echo "fos running for secondary mode"
+        echo "---------------------------------->  Fos running For Secondary mode"
     else
-        echo "fos running for primary mode"
+        echo "---------------------------------->  Fos running For Primary mode"
     fi
     sleep 5
 done

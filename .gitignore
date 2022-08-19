@@ -5,3 +5,6 @@ master_log_01
 newSecondary.txt
 slave_log_01
 Test.sh
+test.conf
+master_fos_log.txt
+slave_fos_log.txt
